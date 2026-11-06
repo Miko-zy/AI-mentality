@@ -1,0 +1,264 @@
+项目名称：基于SpringBoot+Vue的AI陪伴与心理韧性成长平台
+项目说明：本科毕设Web项目，后端SpringBoot2.7.x + Maven + MySQL8.0 + Redis，前端Vue3+TypeScript+Element‑Plus+Vite。
+业务定位：面向普通用户提供AI大模型陪伴对话、CD‑RISC心理韧性评估、心理韧性训练课程、打卡徽章成长档案；管理员做内容审核、反馈处理、公告管理、危机事件管理。
+权限模型：RBAC角色权限，角色分为普通用户、管理员。
+数据库：库名ai_mental_platform，字符集utf8mb4，主键统一BIGINT自增；业务表启用逻辑删除字段is_deleted；手机号、邮箱、聊天消息在业务层做AES‑256加密存储；用户密码使用bcrypt哈希加密；JWT实现登录身份认证。
+输出规范：代码增加中文注释；接口严格遵循RESTful风格；Mybatis‑Plus实现数据库操作；不要冗余无效测试代码；输出完成后简单给出配置、注意事项。
+
+本阶段只搭建项目脚手架，禁止编写任何业务模块（用户、会话、评估等业务实体、service、controller全部不要写）。
+
+后端SpringBoot需要完成内容：
+1.完善pom.xml引入依赖：spring‑boot‑starter‑web、spring‑boot‑starter‑security、jjwt‑api、jjwt‑impl、jjwt‑jackson、mybatis‑plus‑boot‑starter、mysql‑connector‑java、spring‑boot‑starter‑data‑redis、lombok、hutool‑all。
+2.编写application.yml配置文件：mysql连接配置、redis配置、jwt密钥和过期时间配置、mybatis‑plus配置（逻辑删除全局配置）。
+3.通用封装：
+①统一返回泛型Result<T>；
+②自定义业务异常BusinessException；
+③全局异常处理器GlobalExceptionHandler；
+④跨域配置CorsConfig。
+4.工具类编写：
+①JWT工具类：生成token、解析token、校验token有效性；
+②AES‑256加密解密工具类；
+③Bcrypt密码加密工具。
+5.创建标准包结构：controller、service、serviceImpl、mapper、entity、dto、vo、util、exception、config。
+
+前端Vue3+Vite+TypeScript+Element‑Plus需要完成：
+1.基础项目目录结构；
+2.axios二次封装：请求拦截器自动携带token，响应拦截捕获错误、解析后端Result返回体；
+3.定义ts通用泛型Result<T>；
+4.pinia状态管理：存储登录token、当前登录用户信息；
+5.基础vue‑router路由配置，预留登录、首页路由。
+
+只输出脚手架相关全部代码，不要业务代码，输出结束后列出关键配置注意事项。
+禁止省略代码，输出完整全部代码，不要写//省略
+
+
+本阶段只做数据库、实体Entity、Mapper接口，禁止生成Service业务实现、Controller接口代码。
+
+数据库库名：ai_mental_platform，下面是项目完整MySQL建表SQL，请以此SQL作为依据：
+CREATE DATABASE IF NOT EXISTS ai_mental_platform DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_unicode_ci;
+USE ai_mental_platform;
+SET FOREIGN_KEY_CHECKS = 0;
+
+DROP TABLE IF EXISTS crisis_record;
+DROP TABLE IF EXISTS user_feedback;
+DROP TABLE IF EXISTS user_badge;
+DROP TABLE IF EXISTS badge;
+DROP TABLE IF EXISTS daily_checkin;
+DROP TABLE IF EXISTS study_progress;
+DROP TABLE IF EXISTS study_course;
+DROP TABLE IF EXISTS user_scale_record;
+DROP TABLE IF EXISTS scale_question;
+DROP TABLE IF EXISTS mental_scale;
+DROP TABLE IF EXISTS chat_message;
+DROP TABLE IF EXISTS ai_session;
+DROP TABLE IF EXISTS system_notice;
+DROP TABLE IF EXISTS admin;
+DROP TABLE IF EXISTS user;
+
+-- 1.普通用户表
+CREATE TABLE user (
+    user_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '用户ID',
+    phone VARCHAR(128) COMMENT '手机号（加密存储）',
+    email VARCHAR(128) COMMENT '邮箱（加密存储）',
+    password VARCHAR(128) NOT NULL COMMENT 'bcrypt密码哈希',
+    nickname VARCHAR(50) NOT NULL COMMENT '昵称',
+    avatar_url VARCHAR(255) COMMENT '头像URL',
+    register_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '注册时间',
+    last_login_time DATETIME COMMENT '最后登录时间',
+    account_status TINYINT DEFAULT 1 COMMENT '账号状态：0禁用，1正常',
+    real_auth_flag TINYINT DEFAULT 0 COMMENT '实名认证标记：0未认证，1已认证',
+    total_points INT DEFAULT 0 COMMENT '总积分',
+    user_level INT DEFAULT 1 COMMENT '用户等级',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    is_deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标记：0未删，1已删'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='普通用户表';
+
+-- 2.AI对话会话表
+CREATE TABLE ai_session (
+    session_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '会话ID',
+    user_id BIGINT NOT NULL COMMENT '所属用户ID',
+    session_name VARCHAR(100) COMMENT '会话自定义名称',
+    ai_style VARCHAR(50) COMMENT 'AI对话风格',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
+    del_flag TINYINT DEFAULT 0 COMMENT '逻辑删除标记：0未删，1已删',
+    is_deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标记：0未删，1已删',
+    FOREIGN KEY (user_id) REFERENCES user(user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI对话会话表';
+
+-- 3.对话消息表
+CREATE TABLE chat_message (
+    msg_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '消息ID',
+    session_id BIGINT NOT NULL COMMENT '所属会话ID',
+    sender_type TINYINT NOT NULL COMMENT '发送方类型：0用户，1AI',
+    content TEXT NOT NULL COMMENT '消息内容AES256加密存储',
+    send_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '发送时间',
+    audit_status TINYINT DEFAULT 0 COMMENT '内容审核状态：0待审，1通过，2不通过',
+    violate_flag TINYINT DEFAULT 0 COMMENT '违规标记：0正常，1违规',
+    is_deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标记：0未删，1已删',
+    FOREIGN KEY (session_id) REFERENCES ai_session(session_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='对话消息表';
+
+-- 4.心理评估量表表（CD-RISC韧性量表）
+CREATE TABLE mental_scale (
+    scale_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '量表ID',
+    scale_name VARCHAR(100) NOT NULL COMMENT '量表名称',
+    scale_code VARCHAR(50) NOT NULL COMMENT '量表编码',
+    dimension_desc TEXT COMMENT '维度说明',
+    total_question_num INT NOT NULL COMMENT '总题目数',
+    reliability DECIMAL(4,3) COMMENT '公开信度系数',
+    status TINYINT DEFAULT 1 COMMENT '启用状态：0停用，1启用',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    is_deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标记：0未删，1已删'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='心理评估量表表';
+
+-- 5.评估题目表
+CREATE TABLE scale_question (
+    question_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '题目ID',
+    scale_id BIGINT NOT NULL COMMENT '所属量表ID',
+    question_content TEXT NOT NULL COMMENT '题目内容',
+    option_json TEXT COMMENT '选项JSON',
+    score_rule TEXT COMMENT '计分规则',
+    sort_num INT DEFAULT 0 COMMENT '排序号',
+    is_deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标记：0未删，1已删',
+    FOREIGN KEY (scale_id) REFERENCES mental_scale(scale_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评估题目表';
+
+-- 6.用户评估记录表
+CREATE TABLE user_scale_record (
+    record_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '评估记录ID',
+    user_id BIGINT NOT NULL COMMENT '用户ID',
+    scale_id BIGINT NOT NULL COMMENT '量表ID',
+    answer_json TEXT NOT NULL COMMENT '用户作答JSON',
+    total_score INT NOT NULL COMMENT '总分',
+    evaluate_result TEXT COMMENT '评估解读结果',
+    finish_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '完成时间',
+    is_deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标记：0未删，1已删',
+    FOREIGN KEY (user_id) REFERENCES user(user_id),
+    FOREIGN KEY (scale_id) REFERENCES mental_scale(scale_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户心理评估记录表';
+
+-- 7.学习课程表
+CREATE TABLE study_course (
+    course_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '课程ID',
+    course_name VARCHAR(100) NOT NULL COMMENT '课程名称',
+    course_desc TEXT COMMENT '课程简介',
+    cover_url VARCHAR(255) COMMENT '封面图',
+    total_section INT COMMENT '小节总数',
+    status TINYINT DEFAULT 1 COMMENT '0下架，1正常',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    is_deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标记：0未删，1已删'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='心理学习课程表';
+
+-- 8.学习进度表
+CREATE TABLE study_progress (
+    progress_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '进度ID',
+    user_id BIGINT NOT NULL COMMENT '用户ID',
+    course_id BIGINT NOT NULL COMMENT '课程ID',
+    finished_section INT DEFAULT 0 COMMENT '已完成小节',
+    finish_rate DECIMAL(5,2) DEFAULT 0.00 COMMENT '完成百分比',
+    last_study_time DATETIME COMMENT '最后学习时间',
+    is_deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标记：0未删，1已删',
+    FOREIGN KEY (user_id) REFERENCES user(user_id),
+    FOREIGN KEY (course_id) REFERENCES study_course(course_id),
+    UNIQUE KEY uk_user_course (user_id,course_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户学习进度表';
+
+-- 9.打卡记录表
+CREATE TABLE daily_checkin (
+    checkin_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '打卡ID',
+    user_id BIGINT NOT NULL COMMENT '用户ID',
+    checkin_date DATE NOT NULL COMMENT '打卡日期',
+    mood_desc TEXT COMMENT '心情描述',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    is_deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标记：0未删，1已删',
+    FOREIGN KEY (user_id) REFERENCES user(user_id),
+    UNIQUE KEY uk_user_date (user_id,checkin_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='每日打卡表';
+
+-- 10.成就徽章表
+CREATE TABLE badge (
+    badge_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '徽章ID',
+    badge_name VARCHAR(80) NOT NULL COMMENT '徽章名称',
+    badge_icon VARCHAR(255) COMMENT '图标地址',
+    obtain_condition TEXT COMMENT '解锁条件',
+    description TEXT COMMENT '徽章说明',
+    is_deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标记：0未删，1已删'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='成就徽章表';
+
+-- 11.用户-徽章关联表（多对多）
+CREATE TABLE user_badge (
+    ub_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    badge_id BIGINT NOT NULL,
+    obtain_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    is_deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标记：0未删，1已删',
+    FOREIGN KEY (user_id) REFERENCES user(user_id),
+    FOREIGN KEY (badge_id) REFERENCES badge(badge_id),
+    UNIQUE KEY uk_user_badge (user_id,badge_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户获得徽章关联表';
+
+-- 12.用户反馈表
+CREATE TABLE user_feedback (
+    feedback_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '反馈ID',
+    user_id BIGINT NOT NULL COMMENT '用户ID',
+    feedback_content TEXT NOT NULL COMMENT '反馈内容',
+    status TINYINT DEFAULT 0 COMMENT '0待处理，1已回复，2关闭',
+    reply_content TEXT COMMENT '管理员回复',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    is_deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标记：0未删，1已删',
+    FOREIGN KEY (user_id) REFERENCES user(user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户反馈表';
+
+-- 13.系统公告表
+CREATE TABLE system_notice (
+    notice_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '公告ID',
+    notice_title VARCHAR(150) NOT NULL COMMENT '公告标题',
+    notice_content TEXT NOT NULL COMMENT '公告正文',
+    publish_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '发布时间',
+    admin_id BIGINT COMMENT '发布管理员ID',
+    status TINYINT DEFAULT 1 COMMENT '0草稿，1已发布，2下架',
+    is_deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标记：0未删，1已删'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统公告表';
+
+-- 14.危机事件记录表
+CREATE TABLE crisis_record (
+    crisis_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '危机记录ID',
+    user_id BIGINT NOT NULL COMMENT '用户ID',
+    msg_id BIGINT COMMENT '关联消息ID',
+    risk_level TINYINT COMMENT '风险等级1-3',
+    risk_desc TEXT COMMENT '风险描述',
+    handle_status TINYINT DEFAULT 0 COMMENT '0待处理，1已处理',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    is_deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标记：0未删，1已删',
+    FOREIGN KEY (user_id) REFERENCES user(user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI消息风险危机记录表';
+
+-- 15.管理员表
+CREATE TABLE admin (
+    admin_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '管理员ID',
+    username VARCHAR(50) NOT NULL UNIQUE COMMENT '管理员账号',
+    password VARCHAR(128) NOT NULL COMMENT '密码哈希',
+    admin_name VARCHAR(50) COMMENT '管理员姓名',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_login DATETIME,
+    is_deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标记：0未删，1已删'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统管理员表';
+
+-- 初始化基础数据：量表、徽章示例
+INSERT INTO mental_scale(scale_name,scale_code,dimension_desc,total_question_num,reliability,status)
+VALUES ('心理韧性量表CD-RISC','CDRISC','坚韧、力量、乐观三个维度，共25题',25,0.890,1);
+
+INSERT INTO badge(badge_name,badge_icon,obtain_condition,description)
+VALUES ('初次评估','','完成第一次心理评估','完成首次心理韧性评估解锁');
+
+SET FOREIGN_KEY_CHECKS = 1;
+
+需求：
+1.根据上面这整套数据表生成每一张表对应的Mybatis‑Plus Entity实体类，使用lombok；注解包含@TableName、@TableField；逻辑删除字段is_deleted添加@TableLogic注解；日期字段使用LocalDateTime；敏感字段增加注释“业务层AES‑256加密”；
+2.每一个实体生成Mapper接口，继承BaseMapper；
+3.只输出entity实体代码、mapper接口代码，不写业务逻辑；
+输出完成，给出数据库执行操作提醒。
+禁止省略代码，输出完整全部代码，不要写//省略
